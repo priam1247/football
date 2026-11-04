@@ -421,7 +421,13 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=30.0, help="live poll seconds")
     parser.add_argument("--championship", default="all", help="transfer championship id")
     parser.add_argument("--out", help="write JSON to this file")
-    parser.add_argument("--csv", help="also write CSV here")
+    parser.add_argument(
+        "--csv",
+        nargs="?",
+        const="output.csv",
+        default=None,
+        help="also write CSV here (default: output.csv)",
+    )
     parser.add_argument("--json", action="store_true", help="print JSON to stdout")
     args = parser.parse_args()
 
