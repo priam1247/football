@@ -34,7 +34,7 @@ def cmd_live(args: argparse.Namespace) -> int:
 
 
 def cmd_fixtures(args: argparse.Namespace) -> int:
-    day = date.fromisoformat(args.date) if args.date else None
+    day = date.fromisoformat(getattr(args, "date", None)) if getattr(args, "date", None) else None
     scraper = FixturesScraper()
     rows = scraper.fetch(day)
     print(f"\n=== Today's fixtures ({len(rows)}) ===")
@@ -47,7 +47,7 @@ def cmd_fixtures(args: argparse.Namespace) -> int:
 
 
 def cmd_results(args: argparse.Namespace) -> int:
-    day = date.fromisoformat(args.date) if args.date else None
+    day = date.fromisoformat(getattr(args, "date", None)) if getattr(args, "date", None) else None
     scraper = ResultsScraper()
     rows = scraper.fetch(day)
     print(f"\n=== Full-time results ({len(rows)}) ===")
@@ -119,6 +119,7 @@ def cmd_transfers(args: argparse.Namespace) -> int:
 def cmd_all(args: argparse.Namespace) -> int:
     logger.info("Running all scrapers...")
     cmd_live(args)
+    # fixtures/results need --date; default to today for 'all'
     cmd_fixtures(args)
     cmd_results(args)
     cmd_standings(args)
