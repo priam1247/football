@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
-from football_scraper.config import TRANSFERS_IMAGES_DIR, TRANSFERS_JSON_DIR
+from football_scraper.config import BASE_URL, TRANSFERS_IMAGES_DIR, TRANSFERS_JSON_DIR
 from football_scraper.scrapers.base import BaseScraper
 from football_scraper.utils.downloader import download_image
 from football_scraper.utils.helpers import save_json
@@ -26,19 +27,8 @@ class TransfersScraper(BaseScraper):
                 ("count_trans", str(len(rows))),
             ] + [("loadedIds[]", i) for i in loaded_ids]
 
-            payload = self.get_json(
-                "transfer_more?" + "&".join(f"{k}={v}" for k, v in params)
-            )
-            if payload is None:
-                payload = self.get_json(
-                    "transfer_more",
-                    {
-                        "champ": championship,
-                        "count_trans": len(rows),
-                        "loadedIds[]": loaded_ids,
-                    },
-                )
-            new = (payload or {}).get("list") or []
+            payload = self.get_json("transfer_more", params)
+            new = (payload.get("list") if isinstance(payload, dict) else payload) or []
             if not new:
                 break
             for i in new:
@@ -46,14 +36,14 @@ class TransfersScraper(BaseScraper):
                     continue
                 rows.append(
                     {
-                        "transfer_id": str(i.get("id")),
+                        "transfer_id": str(i["id"]) if i.get("id") is not None else None,
                         "player": i.get("player") or i.get("name"),
                         "position": i.get("position"),
                         "from_club": i.get("from_team") or i.get("from"),
                         "to_club": i.get("to_team") or i.get("to"),
                         "type": i.get("type"),
                         "contract_until": i.get("to_date"),
-                        "image": i.get("image"),
+                        "image": urljoin(BASE_URL, i["image"]) if i.get("image") else None,
                         "caption": i.get("caption"),
                     }
                 )
@@ -84,6 +74,7 @@ class TransfersScraper(BaseScraper):
             from_club = node.select_one(".from .club img")
             to_club = node.select_one(".to .club img")
             player = node.select_one(".player h5")
+            photo = node.select_one(".player img")
             position = node.select_one(".player .text span")
             kind = node.select_one(".exch-wrap span")
             until = node.select_one(".to-date")
@@ -100,8 +91,8 @@ class TransfersScraper(BaseScraper):
                     "contract_until": (until.get_text(strip=True) or None)
                     if until
                     else None,
-                    "image": None,
-                    "caption": None,
+                    "image": urljoin(BASE_URL, photo["src"]) if photo and photo.get("src") else None,
+                    "caption": photo.get("alt") if photo else None,
                 }
             )
         return out

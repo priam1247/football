@@ -64,7 +64,7 @@ class FixturesScraper(BaseScraper):
                     else None,
                     "kickoff": (
                         clock.get_text(" ", strip=True)
-                        if clock and score_home is None
+                        if clock and status in ("0", "")
                         else None
                     ),
                     "minute": None,

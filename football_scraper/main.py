@@ -37,7 +37,7 @@ def cmd_fixtures(args: argparse.Namespace) -> int:
     day = date.fromisoformat(getattr(args, "date", None)) if getattr(args, "date", None) else None
     scraper = FixturesScraper()
     rows = scraper.fetch(day)
-    print(f"\n=== Today's fixtures ({len(rows)}) ===")
+    print(f"\n=== Fixtures {(day or date.today()).isoformat()} ({len(rows)}) ===")
     for row in rows:
         print(
             f"{row.get('kickoff') or '-'} | {row.get('championship')} | "
@@ -118,14 +118,14 @@ def cmd_transfers(args: argparse.Namespace) -> int:
 
 def cmd_all(args: argparse.Namespace) -> int:
     logger.info("Running all scrapers...")
-    cmd_live(args)
-    # fixtures/results need --date; default to today for 'all'
-    cmd_fixtures(args)
-    cmd_results(args)
-    cmd_standings(args)
-    cmd_news(args)
-    cmd_transfers(args)
-    return 0
+    status = 0
+    for step in (cmd_live, cmd_fixtures, cmd_results, cmd_standings, cmd_news, cmd_transfers):
+        try:
+            step(args)
+        except Exception as exc:  # noqa: BLE001 - keep going if one scraper fails
+            logger.error("%s failed: %s", step.__name__, exc)
+            status = 1
+    return status
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -166,7 +166,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_trans.set_defaults(func=cmd_transfers)
 
-    sub.add_parser("all", help="Run all scrapers").set_defaults(func=cmd_all)
+    p_all = sub.add_parser("all", help="Run all scrapers")
+    p_all.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p_all.add_argument("--pages", type=int, default=1, help="News/transfer pages")
+    p_all.add_argument("--championship", default="all", help="Transfer championship filter")
+    p_all.add_argument("--no-download-images", action="store_true", help="Skip downloading images")
+    p_all.set_defaults(func=cmd_all, league_id=None, league_name="")
 
     return parser
 

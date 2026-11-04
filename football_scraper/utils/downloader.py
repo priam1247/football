@@ -35,6 +35,9 @@ def download_image(image_url: str | None, save_dir: str | Path) -> str | None:
     try:
         resp = requests.get(image_url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
+        if not resp.headers.get("Content-Type", "image/").startswith("image/"):
+            logger.warning("Not an image (%s): %s", resp.headers.get("Content-Type"), image_url)
+            return None
         dest.write_bytes(resp.content)
         logger.info("Downloaded image: %s -> %s", image_url, dest)
         return str(dest)

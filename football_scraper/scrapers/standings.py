@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
-from football_scraper.config import BIG_LEAGUES
+from football_scraper.config import BASE_URL, BIG_LEAGUES
 from football_scraper.scrapers.base import BaseScraper
 
 
@@ -60,7 +61,7 @@ class StandingsScraper(BaseScraper):
             club = club_node.get_text(" ", strip=True) if club_node else texts[1]
             club_img = row.select_one("td img, .club img")
             club_image = (
-                club_img.get("src") if club_img and club_img.get("src") else None
+                urljoin(BASE_URL, club_img["src"]) if club_img and club_img.get("src") else None
             )
             try:
                 position = int(texts[0])

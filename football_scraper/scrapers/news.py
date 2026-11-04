@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
-from football_scraper.config import NEWS_IMAGES_DIR, NEWS_JSON_DIR
+from football_scraper.config import BASE_URL, NEWS_IMAGES_DIR, NEWS_JSON_DIR
 from football_scraper.scrapers.base import BaseScraper
 from football_scraper.utils.downloader import download_image
 from football_scraper.utils.helpers import save_json
@@ -20,26 +21,29 @@ class NewsScraper(BaseScraper):
         # First page (server-rendered)
         html = self.get("news").text
         for item in self._parse_news(html):
-            if item.get("url"):
+            if item.get("url") and item["url"] not in seen:
                 seen[item["url"]] = item
 
         # Additional pages via AJAX
         for page in range(2, pages + 1):
             payload = self.get_json("get_news_more", {"page": page})
-            items = (payload or {}).get("items") or []
+            items = payload.get("items") if isinstance(payload, dict) else payload
+            items = items or []
             if isinstance(items, dict):
                 items = list(items.values())
             if not items:
                 break
             for item in items:
-                url = item.get("link")
+                if not isinstance(item, dict):
+                    continue
+                url = urljoin(BASE_URL, item["link"]) if item.get("link") else None
                 if url and url not in seen:
                     seen[url] = {
                         "title": item.get("title"),
                         "url": url,
                         "published": None,
                         "summary": item.get("news_desc"),
-                        "image": item.get("image"),
+                        "image": urljoin(BASE_URL, item["image"]) if item.get("image") else None,
                         "caption": item.get("caption") or item.get("news_caption"),
                     }
 
@@ -81,12 +85,9 @@ class NewsScraper(BaseScraper):
                 }
             )
         # Make URLs absolute
-        from urllib.parse import urljoin
-
-        BASE = "https://www.ysscores.com/en/"
         for item in items:
             if item.get("url"):
-                item["url"] = urljoin(BASE, item["url"])
+                item["url"] = urljoin(BASE_URL, item["url"])
             if item.get("image"):
-                item["image"] = urljoin(BASE, item["image"])
+                item["image"] = urljoin(BASE_URL, item["image"])
         return items

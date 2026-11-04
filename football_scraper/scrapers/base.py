@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 import time
 from typing import Any
@@ -41,21 +42,19 @@ class BaseScraper:
 
     # ------------------------------------------------------------------ plumbing
     def _throttle(self) -> None:
-        wait = self.delay + (self.delay * 0.4) * __import__("random").random()
+        wait = self.delay + random.uniform(0, self.delay * 0.4)
         elapsed = time.monotonic() - self._last_call
         if elapsed < wait:
             time.sleep(wait - elapsed)
         self._last_call = time.monotonic()
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
-        import random
-
         last_exc: Exception | None = None
+        verify = kwargs.pop("verify", True)
         for attempt in range(1, MAX_RETRIES + 1):
             self._throttle()
             try:
                 # Try with SSL verification first; fall back to unverified on SSL errors
-                verify = kwargs.pop("verify", True)
                 try:
                     resp = self.session.request(
                         method, url, timeout=self.timeout, verify=verify, **kwargs
@@ -103,7 +102,7 @@ class BaseScraper:
             "POST", urljoin(BASE_URL, path), data=data, headers=headers
         )
 
-    def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def get_json(self, path: str, params: Any = None) -> Any:
         resp = self.get(
             path,
             params=params,
