@@ -485,7 +485,13 @@ def emit(rows: list[dict[str, Any]], label: str, as_json: bool = False) -> None:
                 f"Pts:{row.get('points') or '-'}"
             )
         else:
-            print(f"{row['published'] or ''} {row['title']} -> {row['url']}")
+            caption = row.get("caption") or row.get("summary") or ""
+            image = row.get("image") or ""
+            print(
+                f"{row['published'] or ''} {row['title']}\n"
+                f"  caption: {caption}\n"
+                f"  image: {image}"
+            )
 
 
 def write_output(rows: Iterable[dict[str, Any]], path: str, csv_path: str | None) -> None:

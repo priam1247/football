@@ -12,11 +12,10 @@ Usage:
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-from scraper import YSClient, BIG_LEAGUES
+from scraper import YSClient, BIG_LEAGUES, emit
 
 FIXTURES = Path(__file__).parent / "tests" / "fixtures"
 
@@ -24,17 +23,13 @@ FIXTURES = Path(__file__).parent / "tests" / "fixtures"
 def run_news() -> None:
     html = (FIXTURES / "news_home.html").read_text(encoding="utf-8")
     items = YSClient._parse_news(html)
-    print(f"\n=== news ({len(items)}) ===")
-    for item in items:
-        print(json.dumps(item, ensure_ascii=False))
+    emit(items, "news")
 
 
 def run_standings() -> None:
     html = (FIXTURES / "standings_ucl.html").read_text(encoding="utf-8")
     table = YSClient._parse_standings(html)
-    print(f"\n=== standings ({len(table)}) ===")
-    for row in table:
-        print(json.dumps(row, ensure_ascii=False))
+    emit(table, "standings")
 
 
 def main() -> int:
