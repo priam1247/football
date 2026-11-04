@@ -27,11 +27,8 @@ class FixturesScraper(BaseScraper):
             },
         )
         rows = self._parse_match_list(resp.text, target)
-        # Keep only scheduled (non-live, non-finished) matches
-        fixtures = [
-            r for r in rows if r.get("status_code") == "0" or not r.get("is_live")
-        ]
-        return fixtures
+        # Return all matches for the day (fixtures page shows everything)
+        return rows
 
     # ------------------------------------------------------------------ internals
     @staticmethod
