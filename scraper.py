@@ -240,7 +240,7 @@ class YSClient:
 
     def results(self, day: date | None = None) -> list[dict[str, Any]]:
         """Full-time results only."""
-        return [r for r in self.matches(day, status=3) if r["status"] == "finished"]
+        return [r for r in self.matches(day) if r["status"] == "finished"]
 
     # -------------------------------------------------------------- live feed
     def live_updates(self, day: date | None = None) -> list[dict[str, Any]]:
@@ -266,7 +266,7 @@ class YSClient:
 
     def live_matches(self, day: date | None = None) -> list[dict[str, Any]]:
         """Live matches with teams/scores, clock merged in from the live feed."""
-        rows = [r for r in self.matches(day, status=2) if r["is_live"]]
+        rows = [r for r in self.matches(day) if r["is_live"]]
         clocks = {c["match_id"]: c for c in self.live_updates(day)}
         for row in rows:
             clock = clocks.get(row["match_id"])
