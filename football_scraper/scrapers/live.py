@@ -38,15 +38,23 @@ class LiveScraper(BaseScraper):
 
     # ------------------------------------------------------------------ internals
     def _parse_fixtures_page(self) -> list[dict[str, Any]]:
-        """Fetch /en/fixtures and parse all match rows."""
+        """Fetch today's match list and parse all match rows."""
         from datetime import date
 
         from football_scraper.config import site_date
 
         target = date.today()
-        # Warm up session with the home page to get CSRF token if needed
-        self.get("home")
-        resp = self.get("fixtures")
+        resp = self.post(
+            "match_date_to",
+            {
+                "get_date": site_date(target),
+                "favorite_status": "champ_display",
+                "match_status": "1",  # all; live filtered by status code
+                "order_status": "1",
+                "champs_view": "1",
+                "clear_c": "yes",
+            },
+        )
         return self._parse_match_list(resp.text, target)
 
     def _live_clock_feed(self) -> dict[str, dict[str, Any]]:
@@ -101,7 +109,7 @@ class LiveScraper(BaseScraper):
                     else None,
                     "kickoff": (
                         clock.get_text(" ", strip=True)
-                        if clock and score_home is None
+                        if clock and status in ("0", "")
                         else None
                     ),
                     "minute": None,

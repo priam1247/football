@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from football_scraper.config import STATUS_TEXT
+from football_scraper.config import FINISHED_STATUS, LIVE_STATUSES, STATUS_TEXT
 from football_scraper.scrapers.base import BaseScraper
 
 
@@ -40,7 +40,7 @@ class ResultsScraper(BaseScraper):
         )
         rows = self._parse_match_list(resp.text, target)
         # Keep only finished matches (status code "4")
-        return [r for r in rows if r.get("status_code") == "4"]
+        return [r for r in rows if r.get("status_code") == FINISHED_STATUS]
 
     @staticmethod
     def _parse_match_list(html: str, target) -> list[dict[str, Any]]:
@@ -66,7 +66,7 @@ class ResultsScraper(BaseScraper):
                     "away_team": anchor.get("away_name"),
                     "status_code": status,
                     "status": STATUS_TEXT.get(status, "unknown"),
-                    "is_live": status in {"1", "2", "3", "7", "9"},
+                    "is_live": status in LIVE_STATUSES,
                     "home_score": score_home.get_text(strip=True)
                     if score_home
                     else None,
@@ -75,7 +75,7 @@ class ResultsScraper(BaseScraper):
                     else None,
                     "kickoff": (
                         clock.get_text(" ", strip=True)
-                        if clock and score_home is None
+                        if clock and status in ("0", "")
                         else None
                     ),
                     "minute": None,

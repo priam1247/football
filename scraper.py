@@ -146,7 +146,7 @@ class YSClient:
             headers["X-Requested-With"] = "XMLHttpRequest"
         return self._request("POST", urljoin(BASE, path), data=data, headers=headers)
 
-    def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def get_json(self, path: str, params: Any = None) -> Any:
         resp = self.get(
             path,
             params=params,
@@ -205,7 +205,7 @@ class YSClient:
                     "away_score": score_away.get_text(strip=True) if score_away else None,
                     "kickoff": (
                         clock.get_text(" ", strip=True)
-                        if clock and score_home is None
+                        if clock and status in ("0", "")
                         else None
                     ),
                     "minute": None,
@@ -305,17 +305,20 @@ class YSClient:
                 seen[item["url"]] = item
         for page in range(2, pages + 1):
             payload = self.get_json("get_news_more", {"page": page})
-            items = (payload or {}).get("items") or []
+            items = payload.get("items") if isinstance(payload, dict) else payload
+            items = items or []
             if isinstance(items, dict):
                 items = list(items.values())
             if not items:
                 break
             for item in items:
-                url = item.get("link")
+                if not isinstance(item, dict):
+                    continue
+                url = urljoin(BASE, item["link"]) if item.get("link") else None
                 if url and url not in seen:
                     seen[url] = {
                         "title": item.get("title"),
-                        "url": urljoin(BASE, url),
+                        "url": url,
                         "published": None,
                         "summary": item.get("news_desc"),
                         "image": urljoin(BASE, item.get("image")) if item.get("image") else None,
@@ -358,18 +361,13 @@ class YSClient:
                 ("count_trans", str(len(rows))),
             ]
             params += [("loadedIds[]", i) for i in loaded]
-            payload = self.get_json("transfer_more?" + "&".join(f"{k}={v}" for k, v in params))
-            if payload is None:
-                payload = self.get_json(
-                    "transfer_more",
-                    {"champ": championship, "count_trans": len(rows), "loadedIds[]": loaded},
-                )
-            new = (payload or {}).get("list") or []
+            payload = self.get_json("transfer_more", params)
+            new = (payload.get("list") if isinstance(payload, dict) else payload) or []
             if not new:
                 break
             rows.extend(
                 {
-                    "transfer_id": str(i.get("id")),
+                    "transfer_id": str(i["id"]) if i.get("id") is not None else None,
                     "player": i.get("player") or i.get("name"),
                     "position": i.get("position"),
                     "from_club": i.get("from_team") or i.get("from"),
@@ -555,7 +553,7 @@ def main() -> int:
                     if key not in seen:
                         seen.add(key)
                         print(
-                            f"{datetime.now():%H:%M:%S} {row['minute'] or ''} "
+                            f"{datetime.now():%H:%M:%S} {row.get('minute') or ''} "
                             f"{row['home_team']} {row['home_score']}-{row['away_score']} "
                             f"{row['away_team']}"
                         )
@@ -605,8 +603,8 @@ def main() -> int:
 
     if args.json:
         print(json.dumps(bucket, indent=2, ensure_ascii=False))
-    if args.out:
-        write_output(bucket, args.out, args.csv)
+    if args.out or args.csv:
+        write_output(bucket, args.out or "output.json", args.csv)
     return 0
 
 
