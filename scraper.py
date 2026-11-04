@@ -3,11 +3,14 @@
 ysscores.py - scraper for ysscores.com (Yalla Shoot)
 
 Pulls today's fixtures, full-time results, live score updates, news and
-transfer news into structured JSON/CSV.
+transfer news into structured JSON/CSV. Also scrapes league standings
+tables for major competitions.
 
 How the site actually works (verified against the live pages):
   * /en/home and /en/news and /en/transfer are server-rendered - the data we
     want is in the initial HTML, so plain GETs are enough for a full snapshot.
+  * League standings live at /en/rank/<league_id>/<league_name> (e.g.
+    /en/rank/943230/UEFA-Champions-League).
   * Dynamic pieces go through internal AJAX endpoints, which we reuse:
       POST /en/match_date_to    - match list for any date + status filter
       GET  /en/get_live_matches - JSON [{id, time, status}] live clock feed
@@ -28,6 +31,7 @@ Usage:
     python ysscores.py live --watch --interval 20
     python ysscores.py news --pages 2
     python ysscores.py transfers --pages 3
+    python ysscores.py standings --league-id 943230 --league-name UEFA-Champions-League
     python ysscores.py all --out data.json --csv
 
 Requires: pip install requests beautifulsoup4
@@ -66,6 +70,13 @@ STATUS_TEXT = {
     "14": "postponed",
 }
 LIVE_STATUSES = {"1", "2", "3", "7", "9"}
+
+# Well-known big-league / major-competition rank IDs observed on the site.
+# The standings URL pattern is /en/rank/<league_id>/<league_name>.
+BIG_LEAGUES: dict[str, str] = {
+    "uefa_champions_league": "943230",
+    # Add more as discovered: "premier_league": "<id>", "la_liga": "<id>", etc.
+}
 
 
 class ScrapeError(RuntimeError):
@@ -274,13 +285,15 @@ class YSClient:
             stamp = node.select_one(".news-date span")
             image = node.select_one("img")
             excerpt = node.select_one(".big-news-lead, .news-item-excerpt span")
+            image_src = image.get("src") if image else None
             items.append(
                 {
                     "title": title.get_text(" ", strip=True) if title else None,
                     "url": urljoin(BASE, node["href"]) if node.get("href") else None,
                     "published": stamp.get_text(strip=True) if stamp else None,
                     "summary": excerpt.get_text(" ", strip=True) if excerpt else None,
-                    "image": image.get("src") if image else None,
+                    "image": urljoin(BASE, image_src) if image_src else None,
+                    "caption": image.get("alt") or image.get("title") if image else None,
                 }
             )
         return items
@@ -305,7 +318,8 @@ class YSClient:
                         "url": urljoin(BASE, url),
                         "published": None,
                         "summary": item.get("news_desc"),
-                        "image": item.get("image"),
+                        "image": urljoin(BASE, item.get("image")) if item.get("image") else None,
+                        "caption": item.get("caption") or item.get("news_caption"),
                     }
         return list(seen.values())
 
@@ -369,6 +383,80 @@ class YSClient:
             )
         return rows
 
+    # --------------------------------------------------------------- standings
+    @staticmethod
+    def _parse_standings(html: str) -> list[dict[str, Any]]:
+        """Parse a league table / standings page into row dicts."""
+        soup = BeautifulSoup(html, "html.parser")
+        rows: list[dict[str, Any]] = []
+        for row in soup.select("table tr"):
+            cells = row.select("td, th")
+            if not cells:
+                continue
+            # Skip header rows
+            if cells[0].name == "th":
+                continue
+            texts = [c.get_text(" ", strip=True) for c in cells]
+            if len(texts) < 2:
+                continue
+            # Club name: from a link if present, else from the second cell
+            club_node = row.select_one("td a, .club-name, .club")
+            club = club_node.get_text(" ", strip=True) if club_node else texts[1]
+            # Try to grab club logo / image
+            club_img = row.select_one("td img, .club img")
+            club_image = urljoin(BASE, club_img.get("src")) if club_img and club_img.get("src") else None
+            try:
+                position = int(texts[0])
+            except (ValueError, IndexError):
+                position = None
+            def _num(idx: int) -> str | None:
+                try:
+                    return texts[idx] if texts[idx] else None
+                except IndexError:
+                    return None
+            rows.append(
+                {
+                    "position": position,
+                    "club": club,
+                    "club_image": club_image,
+                    "played": _num(2),
+                    "won": _num(3),
+                    "drawn": _num(4),
+                    "lost": _num(5),
+                    "goals": _num(6),
+                    "goal_difference": _num(7),
+                    "points": _num(8),
+                }
+            )
+        return rows
+
+    def standings(
+        self,
+        league_id: str,
+        league_name: str = "",
+    ) -> list[dict[str, Any]]:
+        """Scrape a league standings table.
+
+        URL pattern: /en/rank/<league_id>/<league_name>
+        """
+        path = f"rank/{league_id}/{league_name}" if league_name else f"rank/{league_id}"
+        html = self.get(path).text
+        table = self._parse_standings(html)
+        for row in table:
+            row["league_id"] = league_id
+            row["league_name"] = league_name
+        return table
+
+    def big_league_standings(self, league_key: str) -> list[dict[str, Any]]:
+        """Convenience wrapper around standings() for a known big-league key."""
+        league_id = BIG_LEAGUES.get(league_key)
+        if not league_id:
+            raise ScrapeError(
+                f"unknown big-league key {league_key!r}; "
+                f"known keys: {', '.join(BIG_LEAGUES)}"
+            )
+        return self.standings(league_id, "")
+
 
 # --------------------------------------------------------------------- output
 def emit(rows: list[dict[str, Any]], label: str, as_json: bool = False) -> None:
@@ -387,6 +475,14 @@ def emit(rows: list[dict[str, Any]], label: str, as_json: bool = False) -> None:
             print(
                 f"{row['player']} ({row['position']}): {row['from_club']} -> "
                 f"{row['to_club']} [{row['type']}]"
+            )
+        elif "club" in row:
+            print(
+                f"{row.get('position') or '-'}. {row['club']} | "
+                f"P{row.get('played') or '-'} W{row.get('won') or '-'} "
+                f"D{row.get('drawn') or '-'} L{row.get('lost') or '-'} | "
+                f"{row.get('goals') or '-'} GD:{row.get('goal_difference') or '-'} "
+                f"Pts:{row.get('points') or '-'}"
             )
         else:
             print(f"{row['published'] or ''} {row['title']} -> {row['url']}")
@@ -412,10 +508,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape ysscores.com")
     parser.add_argument(
         "command",
-        choices=["all", "matches", "results", "live", "news", "transfers"],
+        choices=["all", "matches", "results", "live", "news", "transfers", "standings"],
     )
     parser.add_argument("--date", help="YYYY-MM-DD (default: today)")
     parser.add_argument("--pages", type=int, default=1, help="news/transfer pages")
+    parser.add_argument(
+        "--league-id", help="standings: league id for /en/rank/<id>/<name>"
+    )
+    parser.add_argument(
+        "--league-name",
+        default="",
+        help="standings: league name slug for /en/rank/<id>/<name>",
+    )
     parser.add_argument("--delay", type=float, default=1.2, help="seconds between requests")
     parser.add_argument("--watch", action="store_true", help="live: keep polling")
     parser.add_argument("--interval", type=float, default=30.0, help="live poll seconds")
@@ -475,6 +579,17 @@ def main() -> int:
             rows = client.transfers(pages=max(1, args.pages), championship=args.championship)
             bucket += rows
             emit(rows, "transfers", args.json)
+
+        if args.command == "standings":
+            if not args.league_id:
+                print(
+                    "error: standings requires --league-id (and optionally --league-name)",
+                    file=sys.stderr,
+                )
+                return 1
+            rows = client.standings(args.league_id, args.league_name)
+            bucket += rows
+            emit(rows, f"standings {args.league_id}", args.json)
 
     except KeyboardInterrupt:
         print("\nstopped")
