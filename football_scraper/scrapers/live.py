@@ -12,9 +12,15 @@ class LiveScraper(BaseScraper):
     """Fetch currently live matches."""
 
     def fetch(self) -> list[dict[str, Any]]:
-        """Return a list of live match dicts."""
-        # First get the match list for today with live status filter
-        rows = self._matches_for_today(status=2)
+        """Return a list of live match dicts.
+
+        Strategy:
+        1. Fetch the fixtures page (server-rendered, contains live matches).
+        2. Parse all match rows from the HTML.
+        3. Filter for live matches using data-status codes.
+        4. Enrich with clock data from the get_live_matches JSON endpoint.
+        """
+        rows = self._parse_fixtures_page()
         clocks = self._live_clock_feed()
 
         results: list[dict[str, Any]] = []
@@ -24,35 +30,27 @@ class LiveScraper(BaseScraper):
             match_id = row["match_id"]
             clock = clocks.get(match_id)
             if clock:
-                row["minute"] = clock.get("minute")
+                row["minute"] = clock.get("minute") or row.get("minute")
                 row["status"] = clock.get("status", row.get("status"))
                 row["status_code"] = clock.get("status_code", row.get("status_code"))
             results.append(row)
         return results
 
     # ------------------------------------------------------------------ internals
-    def _matches_for_today(self, status: int = 2) -> list[dict[str, Any]]:
-        """Internal: match list for today from the site's date endpoint."""
+    def _parse_fixtures_page(self) -> list[dict[str, Any]]:
+        """Fetch /en/fixtures and parse all match rows."""
         from datetime import date
 
         from football_scraper.config import site_date
 
         target = date.today()
-        resp = self.post(
-            "match_date_to",
-            {
-                "get_date": site_date(target),
-                "favorite_status": "champ_display",
-                "match_status": str(status),
-                "order_status": "1",
-                "champs_view": "1",
-                "clear_c": "yes",
-            },
-        )
+        # Warm up session with the home page to get CSRF token if needed
+        self.get("home")
+        resp = self.get("fixtures")
         return self._parse_match_list(resp.text, target)
 
     def _live_clock_feed(self) -> dict[str, dict[str, Any]]:
-        """Return {match_id: clock_info} from the live poller."""
+        """Return {match_id: clock_info} from the live poller endpoint."""
         payload = self.get_json("get_live_matches")
         clocks: dict[str, dict[str, Any]] = {}
         if not isinstance(payload, list):
