@@ -1,6 +1,9 @@
 """Configuration for the football scraper project."""
 
-from datetime import date, datetime
+from __future__ import annotations
+
+import re
+from datetime import date
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -14,6 +17,7 @@ MATCH_DATE_ENDPOINT = BASE_URL + "match_date_to"
 LIVE_MATCHES_ENDPOINT = BASE_URL + "get_live_matches"
 NEWS_MORE_ENDPOINT = BASE_URL + "get_news_more"
 TRANSFER_MORE_ENDPOINT = BASE_URL + "transfer_more"
+RANK_URL_TEMPLATE = BASE_URL + "rank/{league_id}/{slug}"
 
 # ---------------------------------------------------------------------------
 # HTTP settings
@@ -32,9 +36,23 @@ REQUEST_TIMEOUT = 25
 MAX_RETRIES = 3
 REQUEST_DELAY = 1.2  # seconds between requests
 
+# The site sits behind Cloudflare and starts serving a "Just a moment..."
+# challenge page (HTTP 403) when a client hammers it. Detect it so the
+# scraper can back off instead of silently scraping an empty page.
+CHALLENGE_MARKERS = ("Just a moment...", "challenges.cloudflare.com", "cf-challenge")
+CHALLENGE_BACKOFF = 8  # seconds to wait before retrying a challenge page
+
+
 def site_date(d: date) -> str:
     """Format a date the way ysscores.com expects: 'November 5,2026'."""
     return f"{d.strftime('%B')} {d.day},{d.year}"
+
+
+def league_slug(title: str) -> str:
+    """Build the URL slug ysscores.com uses for a league: 'UEFA Europa League'
+    -> 'uefa_europa_league'."""
+    slug = re.sub(r"[^0-9a-zA-Z]+", "_", (title or "").strip().lower())
+    return slug.strip("_") or "league"
 
 
 # ---------------------------------------------------------------------------
@@ -51,19 +69,26 @@ STATUS_TEXT = {
     "14": "postponed",
 }
 LIVE_STATUSES = {"1", "2", "3", "7", "9"}
+SCHEDULED_STATUS = "0"
 FINISHED_STATUS = "4"
+POSTPONED_STATUS = "14"
 
 # ---------------------------------------------------------------------------
 # Major league standings IDs (observed on ysscores.com)
 # ---------------------------------------------------------------------------
 BIG_LEAGUES: dict[str, str] = {
-    "premier_league": "",
-    "la_liga": "",
-    "serie_a": "",
-    "bundesliga": "",
-    "ligue_1": "",
     "uefa_champions_league": "943230",
-    "uefa_europa_league": "",
+    "uefa_europa_league": "943229",
+    "uefa_europa_conference_league": "943231",
+    "saudi_pro_league": "941825",
+    "afc_champions_league_two": "944055",
+    "copa_del_rey": "950451",
+    "egypt_cup": "62474482",
+    "iraq_stars_league": "3680601",
+    "campeonato_brasileiro_serie_a": "916145",
+    "oman_professional_league": "943388",
+    "persian_gulf_pro_league": "942681",
+    "argentine_primera_division": "905256",
 }
 
 # ---------------------------------------------------------------------------
@@ -86,19 +111,21 @@ TRANSFERS_IMAGES_DIR = TRANSFERS_DIR / "images"
 
 OUTPUT_DIR = PROJECT_DIR / "output"
 
-# Ensure all data directories exist
-for directory in (
-    DATA_DIR,
-    LIVE_DIR,
-    FIXTURES_DIR,
-    RESULTS_DIR,
-    STANDINGS_DIR,
-    NEWS_DIR,
-    NEWS_JSON_DIR,
-    NEWS_IMAGES_DIR,
-    TRANSFERS_DIR,
-    TRANSFERS_JSON_DIR,
-    TRANSFERS_IMAGES_DIR,
-    OUTPUT_DIR,
-):
-    directory.mkdir(parents=True, exist_ok=True)
+
+def ensure_dirs() -> None:
+    """Create the data/output directory tree."""
+    for directory in (
+        DATA_DIR,
+        LIVE_DIR,
+        FIXTURES_DIR,
+        RESULTS_DIR,
+        STANDINGS_DIR,
+        NEWS_DIR,
+        NEWS_JSON_DIR,
+        NEWS_IMAGES_DIR,
+        TRANSFERS_DIR,
+        TRANSFERS_JSON_DIR,
+        TRANSFERS_IMAGES_DIR,
+        OUTPUT_DIR,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
 
-from football_scraper.config import BASE_URL, BIG_LEAGUES
+from bs4 import BeautifulSoup
+
+from football_scraper.config import BIG_LEAGUES, RANK_URL_TEMPLATE, league_slug
 from football_scraper.scrapers.base import BaseScraper
+from football_scraper.utils.logger import logger
 
 
 class StandingsScraper(BaseScraper):
@@ -17,14 +19,16 @@ class StandingsScraper(BaseScraper):
     def fetch(self, league_id: str, league_name: str = "") -> list[dict[str, Any]]:
         """Return standings rows for a league.
 
-        URL pattern: /en/rank/<league_id>/<league_name>
+        URL pattern: /en/rank/<league_id>/<slug>. The slug is required by the
+        route; the league id is what selects the table.
         """
-        path = f"rank/{league_id}/{league_name}" if league_name else f"rank/{league_id}"
-        html = self.get(path).text
+        slug = league_name or league_slug(league_id)
+        url = RANK_URL_TEMPLATE.format(league_id=league_id, slug=slug)
+        html = self._request("GET", url).text
         table = self._parse_standings(html)
         for row in table:
             row["league_id"] = league_id
-            row["league_name"] = league_name
+            row["league_name"] = league_name or slug
         return table
 
     def fetch_all_known(self) -> dict[str, list[dict[str, Any]]]:
@@ -35,57 +39,59 @@ class StandingsScraper(BaseScraper):
                 continue
             try:
                 results[key] = self.fetch(league_id, key)
-            except Exception as exc:  # noqa: BLE001
-                from football_scraper.utils.logger import logger
-
+            except Exception as exc:  # noqa: BLE001 - one league must not break the rest
                 logger.warning("Failed to fetch standings for %s: %s", key, exc)
         return results
 
     # ------------------------------------------------------------------ internals
     @staticmethod
     def _parse_standings(html: str) -> list[dict[str, Any]]:
-        from bs4 import BeautifulSoup
+        """Parse a standings page.
 
+        The page renders each club as a '.rank-row' div with '.rank-col'
+        children, not as an HTML table.
+        """
         soup = BeautifulSoup(html, "html.parser")
         rows: list[dict[str, Any]] = []
-        for row in soup.select("table tr"):
-            cells = row.select("td, th")
-            if not cells:
+        for row_node in soup.select(".rank-row"):
+            classes = row_node.get("class") or []
+            if "header" in classes:
                 continue
-            if cells[0].name == "th":
-                continue
-            texts = [c.get_text(" ", strip=True) for c in cells]
-            if len(texts) < 2:
-                continue
-            club_node = row.select_one("td a, .club-name, .club")
-            club = club_node.get_text(" ", strip=True) if club_node else texts[1]
-            club_img = row.select_one("td img, .club img")
-            club_image = (
-                urljoin(BASE_URL, club_img["src"]) if club_img and club_img.get("src") else None
-            )
-            try:
-                position = int(texts[0])
-            except (ValueError, IndexError):
-                position = None
 
-            def _num(idx: int) -> str | None:
-                try:
-                    return texts[idx] if texts[idx] else None
-                except IndexError:
+            def col(name: str) -> str | None:
+                node = row_node.select_one(f".rank-col.{name}")
+                if not node:
                     return None
+                return node.get_text(" ", strip=True) or None
+
+            club_node = row_node.select_one(".rank-col.name .info")
+            club = club_node.get_text(" ", strip=True) if club_node else col("name")
+            if not club:
+                continue
+
+            logo = row_node.select_one(".rank-col.name .team-name img")
+            club_image = logo.get("src") if logo else None
+            link = row_node.select_one(".rank-col.name a")
+
+            position_text = col("number")
+            try:
+                position = int(position_text) if position_text else None
+            except (TypeError, ValueError):
+                position = None
 
             rows.append(
                 {
                     "position": position,
                     "club": club,
                     "club_image": club_image,
-                    "played": _num(2),
-                    "won": _num(3),
-                    "drawn": _num(4),
-                    "lost": _num(5),
-                    "goals": _num(6),
-                    "goal_difference": _num(7),
-                    "points": _num(8),
+                    "club_link": link.get("href") if link else None,
+                    "played": col("played"),
+                    "won": col("win"),
+                    "drawn": col("equal"),
+                    "lost": col("lose"),
+                    "goals": col("goals"),
+                    "goal_difference": col("diff"),
+                    "points": col("points"),
                 }
             )
         return rows
