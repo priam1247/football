@@ -8,6 +8,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from football_scraper.config import site_date  # noqa: F401  (re-exported)
+
+__all__ = ["clean_text", "save_json", "parse_date", "site_date"]
+
 
 def clean_text(text: str | None) -> str | None:
     """Strip whitespace and normalise a text value."""
@@ -35,8 +39,3 @@ def parse_date(value: str | None) -> date:
         except ValueError:
             continue
     return date.today()
-
-
-def site_date(d: date) -> str:
-    """Format a date the way ysscores.com expects: 'November 5,2026'."""
-    return f"{d.strftime('%B')} {d.day},{d.year}"

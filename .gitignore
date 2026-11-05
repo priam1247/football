@@ -9,4 +9,7 @@ venv/
 .idea/
 .vscode/
 *.log
+*.csv
+output.json
 football_scraper/output/
+football_scraper/data/

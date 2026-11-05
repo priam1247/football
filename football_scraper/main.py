@@ -10,6 +10,7 @@ from pathlib import Path
 # Ensure the project root is on the path so `football_scraper` package imports work
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from football_scraper.config import ensure_dirs
 from football_scraper.scrapers.fixtures import FixturesScraper
 from football_scraper.scrapers.live import LiveScraper
 from football_scraper.scrapers.news import NewsScraper
@@ -19,13 +20,25 @@ from football_scraper.scrapers.transfers import TransfersScraper
 from football_scraper.utils.logger import logger
 
 
+def _requested_date(args: argparse.Namespace) -> date | None:
+    """The --date the user asked for, if any."""
+    raw = getattr(args, "date", None)
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        raise SystemExit(f"invalid --date {raw!r}; expected YYYY-MM-DD")
+
+
 def cmd_live(args: argparse.Namespace) -> int:
     scraper = LiveScraper()
     rows = scraper.fetch()
     print(f"\n=== Live matches ({len(rows)}) ===")
     for row in rows:
         print(
-            f"[{row.get('status')}] {row.get('championship')} | "
+            f"[{row.get('status_label') or row.get('status')}] "
+            f"{row.get('championship')} | "
             f"{row.get('home_team')} {row.get('home_score') or '-'}-"
             f"{row.get('away_score') or '-'} {row.get('away_team')} | "
             f"minute: {row.get('minute') or '-'}"
@@ -34,10 +47,11 @@ def cmd_live(args: argparse.Namespace) -> int:
 
 
 def cmd_fixtures(args: argparse.Namespace) -> int:
-    day = date.fromisoformat(getattr(args, "date", None)) if getattr(args, "date", None) else None
+    day = _requested_date(args)
     scraper = FixturesScraper()
     rows = scraper.fetch(day)
-    print(f"\n=== Fixtures {(day or date.today()).isoformat()} ({len(rows)}) ===")
+    shown = (scraper.day or date.today()).isoformat()
+    print(f"\n=== Fixtures {shown} ({len(rows)}) ===")
     for row in rows:
         print(
             f"{row.get('kickoff') or '-'} | {row.get('championship')} | "
@@ -47,7 +61,7 @@ def cmd_fixtures(args: argparse.Namespace) -> int:
 
 
 def cmd_results(args: argparse.Namespace) -> int:
-    day = date.fromisoformat(getattr(args, "date", None)) if getattr(args, "date", None) else None
+    day = _requested_date(args)
     scraper = ResultsScraper()
     rows = scraper.fetch(day)
     print(f"\n=== Full-time results ({len(rows)}) ===")
@@ -62,8 +76,8 @@ def cmd_results(args: argparse.Namespace) -> int:
 
 def cmd_standings(args: argparse.Namespace) -> int:
     scraper = StandingsScraper()
-    if args.league_id:
-        rows = scraper.fetch(args.league_id, args.league_name or "")
+    if getattr(args, "league_id", None):
+        rows = scraper.fetch(args.league_id, getattr(args, "league_name", "") or "")
         print(f"\n=== Standings {args.league_id} ({len(rows)}) ===")
         for row in rows:
             print(
@@ -118,6 +132,7 @@ def cmd_transfers(args: argparse.Namespace) -> int:
 
 def cmd_all(args: argparse.Namespace) -> int:
     logger.info("Running all scrapers...")
+    ensure_dirs()
     status = 0
     for step in (cmd_live, cmd_fixtures, cmd_results, cmd_standings, cmd_news, cmd_transfers):
         try:
@@ -135,11 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("live", help="Live matches").set_defaults(func=cmd_live)
 
     p_fix = sub.add_parser("fixtures", help="Today's fixtures")
-    p_fix.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p_fix.add_argument("--date", help="YYYY-MM-DD (default: the site's today)")
     p_fix.set_defaults(func=cmd_fixtures)
 
     p_res = sub.add_parser("results", help="Full-time results")
-    p_res.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p_res.add_argument("--date", help="YYYY-MM-DD (default: the site's today)")
     p_res.set_defaults(func=cmd_results)
 
     p_stand = sub.add_parser("standings", help="League standings")
@@ -167,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_trans.set_defaults(func=cmd_transfers)
 
     p_all = sub.add_parser("all", help="Run all scrapers")
-    p_all.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p_all.add_argument("--date", help="YYYY-MM-DD (default: the site's today)")
     p_all.add_argument("--pages", type=int, default=1, help="News/transfer pages")
     p_all.add_argument("--championship", default="all", help="Transfer championship filter")
     p_all.add_argument("--no-download-images", action="store_true", help="Skip downloading images")
@@ -179,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    ensure_dirs()
     return args.func(args)
 
 

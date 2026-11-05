@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
 
 from football_scraper.config import BASE_URL, NEWS_IMAGES_DIR, NEWS_JSON_DIR
 from football_scraper.scrapers.base import BaseScraper
 from football_scraper.utils.downloader import download_image
 from football_scraper.utils.helpers import save_json
+
+# The AJAX feed serialises dates as a PHP-style dict, e.g.
+# "{'date': '2026-11-05 00:27:30.000000', 'timezone_type': 3, ...}"
+_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 
 class NewsScraper(BaseScraper):
@@ -37,22 +44,29 @@ class NewsScraper(BaseScraper):
                 if not isinstance(item, dict):
                     continue
                 url = urljoin(BASE_URL, item["link"]) if item.get("link") else None
-                if url and url not in seen:
-                    seen[url] = {
-                        "title": item.get("title"),
-                        "url": url,
-                        "published": None,
-                        "summary": item.get("news_desc"),
-                        "image": urljoin(BASE_URL, item["image"]) if item.get("image") else None,
-                        "caption": item.get("caption") or item.get("news_caption"),
-                    }
+                if not url or url in seen:
+                    continue
+                summary = item.get("news_desc")
+                seen[url] = {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "url": url,
+                    "published": self._extract_date(item.get("created_at")),
+                    "summary": summary,
+                    "image": urljoin(BASE_URL, item["image"]) if item.get("image") else None,
+                    "caption": item.get("caption") or item.get("news_caption") or summary,
+                }
 
         results = list(seen.values())
 
         if download_images:
             for item in results:
                 image_url = item.get("image")
-                local_path = download_image(image_url, NEWS_IMAGES_DIR) if image_url else None
+                local_path = (
+                    download_image(image_url, NEWS_IMAGES_DIR, session=self.session)
+                    if image_url
+                    else None
+                )
                 item["image_local"] = local_path
                 item["image_url"] = image_url
 
@@ -62,16 +76,24 @@ class NewsScraper(BaseScraper):
 
     # ------------------------------------------------------------------ internals
     @staticmethod
-    def _parse_news(html: str) -> list[dict[str, Any]]:
-        from bs4 import BeautifulSoup
+    def _extract_date(value: Any) -> str | None:
+        """Pull an ISO date out of the feed's date field."""
+        if not value:
+            return None
+        match = _DATE_RE.search(str(value))
+        return match.group(1) if match else None
 
+    @staticmethod
+    def _parse_news(html: str) -> list[dict[str, Any]]:
         soup = BeautifulSoup(html, "html.parser")
         items: list[dict[str, Any]] = []
         for node in soup.select("a.news-item"):
             title = node.select_one(".news-title")
             stamp = node.select_one(".news-date span")
             image = node.select_one("img")
-            excerpt = node.select_one(".big-news-lead, .news-item-excerpt span")
+            excerpt = node.select_one(
+                ".big-news-lead, .news-item-excerpt span, .news-item-excerpt"
+            )
             image_src = image.get("src") if image else None
             href = node.get("href", "")
             items.append(
@@ -81,7 +103,7 @@ class NewsScraper(BaseScraper):
                     "published": stamp.get_text(strip=True) if stamp else None,
                     "summary": excerpt.get_text(" ", strip=True) if excerpt else None,
                     "image": image_src,
-                    "caption": image.get("alt") or image.get("title") if image else None,
+                    "caption": (image.get("alt") or image.get("title")) if image else None,
                 }
             )
         # Make URLs absolute
